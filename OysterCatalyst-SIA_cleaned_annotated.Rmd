@@ -1,0 +1,989 @@
+---
+title: "OysterCatalyst-SIA"
+author: "XXX"
+date: "2026-07-21"
+output: html_document
+---
+
+This notebook compiles the stable isotope mixing-model workflow used for journal submission, including isotope biplots, MixSIAR runs by site, contribution summaries, environmental associations, hypervolume analyses, and trophic-level comparisons.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  error = FALSE,
+  fig.width = 14,
+  fig.height = 10,
+  out.width = "75%"
+)
+
+# Clear the workspace and graphics devices before running the analysis.
+rm(list = ls())
+graphics.off()
+# Load the majority of relevant packages
+library(tidyverse) # For data manipulation and summarization
+library(plotrix) #To use standard error calculation
+library(cowplot) #For grouping plots
+library(scales) #For editing axis scales
+library(vegan) #For multivariate analyses
+library(rstatix) #For running ANCOVA
+library(ggpmisc) #adding equation and r2 to figures
+
+alpha <- 0.05
+formula <- y ~ x  # Generic y~x formula placeholder used in plotting helpers.
+theme_set(theme_bw(base_size = 20))
+```
+
+## Stable isotope biplots
+
+Create carbon-nitrogen and carbon-sulfur biplots for source and consumer isotope means with ±1 SD error bars across sites.
+
+```{r}
+#Read in source data for all sites
+#Rename site and source names for consistency
+sia<-read.csv("Data/SIA/MCsources.csv")%>%mutate(Site = fct_recode(Site, "NI-WB"="NIWB"))%>%mutate(Source = fct_recode(Source, "Benthic microalgae"="Benthic algae", "S. alterniflora"="Spartina", "sPOM" = "POM"))
+
+#Order sites from north to south
+sia$Site<-factor(sia$Site, levels=c("NC", "NI-WB", "SI", "GTM"))
+
+#Create C&N biplot
+cn<-ggplot(sia, aes(x=Meand13C, y=Meand15N))+
+  geom_errorbar(aes(ymax=Meand15N+SDd15N, ymin=Meand15N-SDd15N))+
+                  geom_errorbarh(aes(xmax=Meand13C+SDd13C, xmin=Meand13C-SDd13C))+
+  geom_point(aes(shape=Source,fill=Site),color="black", size=4)+
+  scale_shape_manual(values=c(21,22,23,24,25))+
+   scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  theme(plot.title = element_text(size = 16, face = "bold"))+
+  labs(x=expression(delta*"13C"), y=expression(delta*"15N"))+
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+theme(legend.position="none")
+
+#Create C & S biplot
+cs<-ggplot(sia, aes(x=Meand13C, y=Meand34S))+
+  geom_errorbar(aes(ymax=Meand34S+SDd34S, ymin=Meand34S-SDd34S))+
+                  geom_errorbarh(aes(xmax=Meand13C+SDd13C, xmin=Meand13C-SDd13C))+
+  geom_point(aes(shape=Source,fill=Site),color="black", size=4)+
+  scale_shape_manual(values=c(21,22,23,24,25))+
+  scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  theme(plot.title = element_text(size = 16, face = "bold"))+
+  labs(x=expression(delta*"13C"), y=expression(delta*"34S"))+
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+#Use package cowplot to combine figures 
+library(cowplot)
+plot_grid(cn, cs, rel_widths = c(0.7, 1))
+
+#Read in consumer data for all sites 
+cons<-read.csv("Data/SIA/AllConsumers.csv")%>%
+  group_by(Site, Species)%>%
+  summarize(mdC=mean(d13C), sdC=sd(d13C),mdN=mean(d15N), sdN=sd(d15N), mdS=mean(d34S), sdS=sd(d34S), tot=n())%>%
+  mutate(Site = fct_recode(Site, "NI-WB"="NIWB"))
+
+#Reorder sites from north to south
+cons$Site<-factor(cons$Site, levels=c("NC", "NI-WB", "SI", "GTM"))
+
+#create C & N biplot
+cn1<-ggplot(cons, aes(x=mdC, y=mdN))+
+  geom_errorbar(aes(ymax=mdN+sdN, ymin=mdN-sdN))+
+                  geom_errorbarh(aes(xmax=mdC+sdC, xmin=mdC-sdC))+
+  geom_point(aes(shape=Species,fill=Site),color="black", size=4)+
+  scale_shape_manual(values=c(21,22,23,24,25))+
+   scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  theme(plot.title = element_text(size = 16, face = "bold"))+
+  labs(x=expression(delta*"13C"), y=expression(delta*"15N"))+
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+theme(legend.position="none")
+
+#Create C & S Biplot
+cs1<-ggplot(cons, aes(x=mdC, y=mdS))+
+  geom_errorbar(aes(ymax=mdS+sdS, ymin=mdS-sdS))+
+                  geom_errorbarh(aes(xmax=mdC+sdC, xmin=mdC-sdC))+
+  geom_point(aes(shape=Species,fill=Site),color="black", size=4)+
+  scale_shape_manual(values=c(21,22,23,24,25))+
+  scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  guides(fill=guide_legend(override.aes=list(shape=21)))+
+  theme(plot.title = element_text(size = 16, face = "bold"))+
+  labs(x=expression(delta*"13C"), y=expression(delta*"34S"))+
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+#Combine figures
+plot_grid(cn1, cs1, rel_widths = c(0.7, 1), ncol=2)
+
+#Save file of consumer mean (used to create tables)
+#write.csv(cons, "Data/SIA/AllConsumerMeans.csv")
+```
+
+## MixSIAR mixing models
+
+```{r}
+#Open MixSIAR package used for stable isotope mixing model
+library(MixSIAR)
+```
+
+### Run mixing model for Sapelo Island data (Georgia)
+```{r}
+#Read in consumer data
+mix1 <- load_mix_data(filename="Data/SIA/MCconsumersSI.csv",
+                      iso_names=c("d13C", "d34S"),
+                      factors=c("Species"),
+                      fac_random=c(FALSE),
+                      fac_nested=c(FALSE),
+                      cont_effects=NULL)
+
+#Read in source data
+source1 <- load_source_data(filename="Data/SIA/MCsourcesSI.csv",
+                            source_factors = NULL,
+                            conc_dep=FALSE, 
+                            data_type="means", 
+                            mix1)
+
+#Read in trophic discrimination factors
+discr1 <- load_discr_data(filename="Data/SIA/MCdiscrimination.csv", mix1)
+
+#Plot data into isotopic space
+plot_data(filename="Outputs/SIA/SI/isospace_plot",
+          plot_save_pdf=FALSE,
+          plot_save_png=TRUE,
+          mix1,source1,discr1)
+
+
+# Define model structure and write JAGS model file
+model_filename <- "Outputs/SIA/SI/MixSIAR_model_SI.txt"
+resid_err <- FALSE
+process_err <- TRUE
+write_JAGS_model(model_filename, resid_err, process_err, mix1, source1)
+
+# Run the JAGS model
+#jagsNC.1 <- run_model(run="test", mix, source, discr, model_filename, alpha.prior=1, resid_err, process_err)
+jagsSI <- run_model(run="normal", mix1, source1, discr1, model_filename, alpha.prior=1, resid_err, process_err)
+
+# Process diagnostics, summary stats, and posterior plots
+output_options = list(summary_save = TRUE,
+                      summary_name = "Outputs/SIA/SI/SI_summary_statistics1",
+                      sup_post = T,
+                      plot_post_save_pdf = F,
+                      plot_post_name = "Outputs/SIA/SI/SI_posterior_density1",
+                      sup_pairs = T,
+                      plot_pairs_save_pdf = F,
+                      plot_pairs_name = "Outputs/SIA/SI/SI_pairs_plot1",
+                      sup_xy = T,
+                      plot_xy_save_pdf = FALSE,
+                      plot_xy_name = "Outputs/SIA/SI/SI_xy_plot1",
+                      gelman = TRUE,
+                      heidel = FALSE,
+                      geweke = TRUE,
+                      diag_save = T,
+                      diag_name = "Outputs/SIA/SI/SI_diagnostics",
+                      indiv_effect = FALSE,
+                      plot_post_save_png = FALSE,
+                      plot_pairs_save_png = FALSE,
+                      plot_xy_save_png = FALSE,
+                      diag_save_ggmcmc = FALSE)
+
+# display outputs for SI model 
+output_JAGS(jagsSI, mix1, source1, output_options)
+
+
+```
+
+
+### Run mixing model for GTM data (Florida)
+
+```{r}
+#Read in consumer data
+mix2 <- load_mix_data(filename="Data/SIA/MCconsumersGTM.csv",
+                      iso_names=c("d13C", "d34S"),
+                      factors=c("Species"),
+                      fac_random=c(FALSE),
+                      fac_nested=c(FALSE),
+                      cont_effects=NULL)
+#Read in source data
+source2 <- load_source_data(filename="Data/SIA/MCsourcesGTM.csv",
+                            source_factors = NULL,
+                            conc_dep=FALSE, 
+                            data_type="means", 
+                            mix2)
+
+#Read in discrimination factors
+discr2 <- load_discr_data(filename="Data/SIA/MCdiscrimination.csv", mix2)
+
+#Plot data into isotopic space
+plot_data(filename="Outputs/SIA/GTM/isospace_plot",
+          plot_save_pdf=FALSE,
+          plot_save_png=TRUE,
+          mix2,source2,discr2)
+
+
+# Define model structure and write JAGS model file
+model_filename1 <- "Outputs/SIA/GTM/MixSIAR_model_GTM.txt"
+resid_err <- FALSE
+process_err <- TRUE
+write_JAGS_model(model_filename1, resid_err, process_err, mix2, source2)
+
+# Run the JAGS model ("test" first, then "short")
+#jagsNC.1 <- run_model(run="test", mix, source, discr, model_filename, alpha.prior=1, resid_err, process_err)
+jagsGTM <- run_model(run="normal", mix2, source2, discr2, model_filename1, alpha.prior=1, resid_err, process_err)
+
+# Process diagnostics, summary stats, and posterior plots
+#output_JAGS(jagsNC.1, mix, source)
+
+output_options2 = list(summary_save = TRUE,
+                      summary_name = "Outputs/SIA/GTM/GTM_summary_statistics1",
+                      sup_post = T,
+                      plot_post_save_pdf = F,
+                      plot_post_name = "Outputs/SIA/GTM/GTM_posterior_density1",
+                      sup_pairs = T,
+                      plot_pairs_save_pdf = F,
+                      plot_pairs_name = "Outputs/SIA/GTM/GTM_pairs_plot1",
+                      sup_xy = TRUE,
+                      plot_xy_save_pdf = FALSE,
+                      plot_xy_name = "Outputs/SIA/GTM/GTM_xy_plot1",
+                      gelman = TRUE,
+                      heidel = FALSE,
+                      geweke = TRUE,
+                      diag_save = T,
+                      diag_name = "Outputs/SIA/GTM/GTM_diagnostics",
+                      indiv_effect = FALSE,
+                      plot_post_save_png = FALSE,
+                      plot_pairs_save_png = FALSE,
+                      plot_xy_save_png = FALSE,
+                      diag_save_ggmcmc = FALSE)
+# display outputs
+output_JAGS(jagsGTM, mix2, source2, output_options2)
+
+
+```
+
+
+### Run mixing model for NI-WB data (South Carolina)
+
+```{r}
+#Read in consumer data
+mix3 <- load_mix_data(filename="Data/SIA/MCconsumersNI.csv",
+                      iso_names=c("d13C", "d34S"),
+                      factors=c("Species"),
+                      fac_random=c(FALSE),
+                      fac_nested=c(FALSE),
+                      cont_effects=NULL)
+#Read in source data
+source3 <- load_source_data(filename="Data/SIA/MCsourcesNI.csv",
+                            source_factors = NULL,
+                            conc_dep=FALSE, 
+                            data_type="means", 
+                            mix3)
+#Read in trophic discrimination factors
+discr3 <- load_discr_data(filename="Data/SIA/MCdiscrimination.csv", mix3)
+
+#Plot data in isotopic space
+plot_data(filename="Outputs/SIA/NI/isospace_plot",
+          plot_save_pdf=FALSE,
+          plot_save_png=TRUE,
+          mix3,source3,discr3)
+
+
+# Define model structure and write JAGS model file
+model_filename3 <- "Outputs/SIA/NI/MixSIAR_model_NI.txt"
+resid_err <- FALSE
+process_err <- TRUE
+write_JAGS_model(model_filename3, resid_err, process_err, mix3, source3)
+
+# Run the JAGS model ("test" first, then "short")
+#jagsNC.1 <- run_model(run="test", mix, source, discr, model_filename, alpha.prior=1, resid_err, process_err)
+jagsNI <- run_model(run="normal", mix3, source3, discr3, model_filename3, alpha.prior=1, resid_err, process_err)
+
+# Process diagnostics, summary stats, and posterior plots
+#output_JAGS(jagsNC.1, mix, source)
+
+output_options3 = list(summary_save = TRUE,
+                      summary_name = "Outputs/SIA/NI/NI_summary_statistics1",
+                      sup_post = T,
+                      plot_post_save_pdf = F,
+                      plot_post_name = "Outputs/SIA/NI/NI_posterior_density1",
+                      sup_pairs = T,
+                      plot_pairs_save_pdf = F,
+                      plot_pairs_name = "Outputs/SIA/NI/NI_pairs_plot1",
+                      sup_xy = TRUE,
+                      plot_xy_save_pdf = FALSE,
+                      plot_xy_name = "Outputs/SIA/NI/NI_xy_plot1",
+                      gelman = TRUE,
+                      heidel = FALSE,
+                      geweke = TRUE,
+                      diag_save = T,
+                      diag_name = "Outputs/SIA/NI/NI_diagnostics",
+                      indiv_effect = FALSE,
+                      plot_post_save_png = FALSE,
+                      plot_pairs_save_png = FALSE,
+                      plot_xy_save_png = FALSE,
+                      diag_save_ggmcmc = FALSE)
+# display outputs for NI-WB
+output_JAGS(jagsNI, mix3, source3, output_options3)
+
+```
+
+### Run mixing model for NC data (North Carolina)
+
+```{r}
+#Read in consumer data
+mix4 <- load_mix_data(filename="Data/SIA/MCconsumersNC.csv",
+                      iso_names=c("d13C", "d34S"),
+                      factors=c("Species"),
+                      fac_random=c(FALSE),
+                      fac_nested=c(FALSE),
+                      cont_effects=NULL)
+#Read in source data
+source4 <- load_source_data(filename="Data/SIA/MCsourcesNC.csv",
+                            source_factors = NULL,
+                            conc_dep=FALSE, 
+                            data_type="means", 
+                            mix4)
+#RTead in trophic discrimination factors
+discr4 <- load_discr_data(filename="Data/SIA/MCdiscrimination.csv", mix4)
+
+#Plot data in isotopic space
+plot_data(filename="Outputs/SIA/NC/isospace_plot",
+          plot_save_pdf=FALSE,
+          plot_save_png=TRUE,
+          mix4,source4,discr4)
+
+
+# Define model structure and write JAGS model file
+model_filename4 <- "Outputs/SIA/NC/MixSIAR_model_NC.txt"
+resid_err <- FALSE
+process_err <- TRUE
+write_JAGS_model(model_filename4, resid_err, process_err, mix4, source4)
+
+# Run the JAGS model ("test" first, then "short")
+#jagsNC.1 <- run_model(run="test", mix, source, discr, model_filename, alpha.prior=1, resid_err, process_err)
+jagsNC <- run_model(run="normal", mix4, source4, discr4, model_filename4, alpha.prior=1, resid_err, process_err)
+
+# Process diagnostics, summary stats, and posterior plots
+#output_JAGS(jagsNC.1, mix, source)
+
+output_options4 = list(summary_save = TRUE,
+                      summary_name = "Outputs/SIA/NC/NC_summary_statistics1",
+                      sup_post = T,
+                      plot_post_save_pdf = F,
+                      plot_post_name = "Outputs/SIA/NC/NC_posterior_density1",
+                      sup_pairs = T,
+                      plot_pairs_save_pdf = F,
+                      plot_pairs_name = "Outputs/SIA/NC/NC_pairs_plot1",
+                      sup_xy = TRUE,
+                      plot_xy_save_pdf = FALSE,
+                      plot_xy_name = "Outputs/SIA/NC/NC_xy_plot1",
+                      gelman = TRUE,
+                      heidel = FALSE,
+                      geweke = TRUE,
+                      diag_save = T,
+                      diag_name = "Outputs/SIA/NC/NC_diagnostics",
+                      indiv_effect = FALSE,
+                      plot_post_save_png = FALSE,
+                      plot_pairs_save_png = FALSE,
+                      plot_xy_save_png = FALSE,
+                      diag_save_ggmcmc = FALSE)
+
+# display outputs for NC model
+output_JAGS(jagsNC, mix4, source4, output_options4)
+
+```
+
+## Bootstrapped contribution boxplots
+
+Construct bootstrap-based boxplots from model means, standard deviations, and 95% intervals by sampling 100 random individuals within each species, flow regime, and season.
+
+```{r}
+library(truncnorm)
+#Read in a combined output (summary statistics) from all 4 mixing models above
+comb<-read.csv("Data/SIA/NERRCat_summary_statisticsV4.csv")
+
+#Filter out relevant column for bootstrapping the data to 100 individuals
+comb1<-comb%>%
+  select(Species, Source, Mean, SD, X2.50., X97.50.)
+
+#eco is name of data frame, n = number of samples you want. 
+#Create function for bootstraping data using means and credible intervals for estimate source contributions for 100 individuals of each taxa at each site
+HVvalues = function(eco,n){
+  set.seed(14)
+  df_tot = data.frame(Species = character(0),
+                      Source = character(0), Vals = integer(0))
+  for (i in 1:nrow(eco)){
+    Vals = truncnorm::rtruncnorm(n, eco[i,5], eco[i,6], eco[i,3], eco[i,4])
+    #Vals = rnorm(n, eco[i,4], eco[i,5])
+    Species = list(rep(eco[i,1],n))
+    Source = list(rep(eco[i,2],n))
+    num = list(seq(1, n, 1))
+    df = as.data.frame(c(Species = Species, num = num,
+                         Source = Source, as.data.frame(Vals)))
+    df_tot = rbind(df_tot, df)
+  }
+  df_com = tidyr::spread(df_tot, 'Source', 'Vals')
+  ####### part below - divides all source contributions by sum of all source conts so that it = 1
+  set<-df_com[3:ncol(df_com)]
+  set$sum<-rowSums(set)
+  cols<-seq(3,ncol(df_com))
+  for (i in 1:nrow(df_com)){
+    for(j in 1:length(cols)){
+      df_com[i,cols[j]]<-df_com[i,cols[j]]/set[i,ncol(set)] #change value here to 1 + number of sources for your data
+    }}
+  df_com$sum<-rowSums(df_com[3:ncol(df_com)])
+  return(df_com)
+}
+
+#Use HV valees function (created above) to bootstrap data 
+comb100<-HVvalues(comb1, 100)
+
+#Convert data frame from wide format into long format for analysis 
+comb100X<-comb100 %>% separate(Species,into=c('Site', 'Species'), sep="-")%>%
+  select(Site, Species, `Benthic algae`, `POM`,  `Spartina`)%>%
+  gather(Source, Contr, -Species, -Site)
+
+#Reorder sites and species for plotting
+comb100X$Site<-factor(comb100X$Site, levels=c("NC", "NI", "SI", "GTM"))
+levels(comb100X$Site)<-c("NC", "NIWB", "SI", "GTM")
+comb100X$Species<-factor(comb100X$Species, levels=c("Oyster", "Mud crab", "White shrimp", "Blue crab", "Pinfish"))
+
+
+#Create a file to examine the ratios between different sources at each site
+combRatio<-comb100 %>% separate(Species,into=c('Site', 'Species'), sep="-")%>%
+  select(Site, Species, `Benthic algae`, `POM`)
+
+#Create ratio column berween sPOM and benthic microalgae
+combRatio$POMBAratio<-(combRatio$POM-combRatio$`Benthic algae`)
+
+#Reorder sites and speices
+combRatio$Site<-factor(combRatio$Site, levels=c("NC", "NI", "SI","GTM"))
+levels(combRatio$Site)<-c("NC", "NIWB", "SI", "GTM")
+combRatio$Species<-factor(combRatio$Species, levels=c("Oyster", "Mud crab", "White shrimp", "Blue crab", "Pinfish"))
+
+#Save bootstrapped data into CSV file for later use
+#write.csv(comb100X, "comb100.csv")
+
+#Plot the proportional contributions of basal resources for each taxa and site
+
+#Rename sites and sources for consistency
+comb100X<-comb100X%>%mutate(Site = fct_recode(Site, "NI-WB"="NIWB"))%>%mutate(Source = fct_recode(Source, "Benthic microalgae"="Benthic algae", "S. alterniflora"="Spartina", "sPOM" = "POM"))
+
+#Plot the proportional contributions of basal resources for each taxa and site
+ggplot(comb100X, aes(x=Source, y=Contr))+
+  geom_boxplot(aes(fill=Source))+
+  scale_fill_brewer(palette="Purples")+
+  facet_grid(Site~Species)+
+  theme_bw()+ 
+  labs(y="Proportional contribution", x="Basal resource")+
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="none")
+  
+```
+
+## Examine the relationships between source contributions and environmental characteristics
+
+```{r}
+#Read in environmetal data characteristic data
+char2<-read.csv("Data/AllNERRCatDataSummarized.csv")%>%
+  group_by(RESERVE)%>%
+  summarize_all(list(mean))%>%
+  rename(Site=RESERVE)
+
+#Select relevant columns 
+char1<-char2[,c(4:9, 13,17,21,25,38,39,40)]
+
+#Look at correlation matrix to determine correlated parameters
+corrplot::corrplot.mixed(cor(char1))
+
+#Combine bootstrap contribution data to reserve characteristics
+combenvir<-left_join(char2, combRatio, by="Site")
+combenvir<-combenvir[,-c(2,3)]
+
+combenvir$Site<-factor(combenvir$Site, levels=c("NC", "NIWB", "SI", "GTM"))
+```
+
+
+```{r}
+#Test correlation between PC1 and PC2
+cor.test(combenvir$PC2,combenvir$PC1) #highly correlated therefore cannot be includedi the same model
+
+#Reorder speceis 
+combenvir$Species<-factor(combenvir$Species, levels=c("Oyster", "Mud crab", "White shrimp", "Blue crab", "Pinfish"))
+
+#Plot PC axes to contribution of benthic microalgae
+p2<-ggplot(combenvir, aes(x=PC2, y=`Benthic algae`))+
+  labs(y="Contribution of \n benthic microalgae production")+
+   geom_point(shape=21, size=3, position=position_jitter(0.08), aes(fill=Site))+
+    scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  facet_grid(~Species)+
+  stat_smooth(method="lm", color="gray")+
+  theme(legend.position="none")+
+   theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+p1<-ggplot(combenvir, aes(x=PC1, y=`Benthic algae`))+
+  labs(y="Contribution of \n benthic microalgae production")+
+   geom_point(shape=21, size=3, position=position_jitter(0.08), aes(fill=Site))+
+    scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2","#5e3c99"))+
+  facet_grid(~Species)+
+  stat_smooth(method="lm", color="gray")+
+  theme(legend.position="none")+
+   theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+#Combine PC plots into 1 figure
+plot_grid(p1,p2, ncol=1, labels=c("A","B"),  label_size = 20)
+
+#Open lme4 to run mixed models
+library(lme4)
+
+#Run linear mixed model with PC1 as fixed and species as a random variable
+m1<-lmer(`Benthic algae`~PC1+(1|Species), data=combenvir, na.action=na.fail)
+summary(m1)
+MuMIn::r.squaredGLMM(m1)
+MuMIn::dredge(m1)
+
+#Run linear mixed model with PC2 as fixed and species as a random variable
+m2<-lmer(`Benthic algae`~PC2+(1|Species), data=combenvir, na.action=na.fail)
+MuMIn::r.squaredGLMM(m2)
+MuMIn::dredge(m2)
+#PC2 stronger model than using PC1 
+
+#Visually examine output from PC2 model
+library(visreg)
+
+visreg(m2, type="contrast")
+
+visreg(m2, type="conditional")
+
+```
+
+
+```{r}
+library(hypervolume)
+#Function to make random points of n length
+# Generate random values from means and standard deviations.
+# When end_points = TRUE, values are constrained to the interval defined by low and high.
+# ID_rows and names can be supplied as either column names or column numbers, but they must match the same convention.
+# df = data frame or tibble in which each row is a unique observation.
+# ID_rows = vector of columns containing identifier information.
+# names = column name or number for the measured variable name.
+# mean = column name or number containing the mean.
+# sd = column name or number containing the standard deviation.
+# n = number of points to generate.
+# z_score = TRUE/FALSE; if TRUE, z-score the values.
+# end_points = TRUE/FALSE; if TRUE, generate between a high and low end point (for example, a 5% to 95% interval).
+# low and high are required when end_points = TRUE.
+# low = column name or number with the lower bound.
+# high = column name or number with the upper bound.
+HVvalues = function(df, ID_rows, names, mean, sd, n, z_score = T,
+                    end_points = F, low = NULL, high = NULL){
+  require(tidyverse)
+  require(truncnorm)
+  
+  # check to see if information is needed to restrict where points are
+  if (end_points){
+    if (is_empty(df[,low]) | is_empty(df[,high])){
+      return(cat('Warning: low and/or high columns not specified \n
+                  Specific and run again or end_points = F \n'))
+    }
+  }
+  
+  # check to see if there are more 
+  if (TRUE %in% duplicated(df[, c(ID_rows, names)])) {
+    return(cat('Warning: some of the rows contain duplicated information \n
+                make sure data is correct \n'))
+  }
+  
+  # rename variables to make code work
+  if (is.numeric(mean)) {
+    names(df)[mean] = 'Mean'
+  } else {
+    df = df |>  rename(Mean = mean)
+  }
+  
+  if (is.numeric(sd)) {
+    names(df)[sd] = 'SD'
+  } else {
+    df = df |>  rename(SD = sd)
+  }
+  
+  if (end_points) {
+    if (is.numeric(low)) {
+      names(df)[low] = 'lower'
+    } else {
+      df = df |>  rename(lower = low)
+    }
+    
+    if (is.numeric(high)){
+      names(df)[high] = 'upper'
+    } else {
+      df = df |>  rename(upper = high)
+    }
+  }
+  
+  # make sure the names is not numeric 
+  if (is.numeric(names)) {
+    names = names(df)[names]
+  }
+  
+  labs = unique(as.vector(df[,names])[[1]])
+  # generate random points within bounds
+  if (end_points) {
+    
+    df_tot = df |> slice(rep(1:n(), each=n))|> 
+      mutate(point = 
+               truncnorm::rtruncnorm(1, a = lower, b = upper,
+                                     mean = Mean, sd = SD)) |> 
+      ungroup() |> 
+      mutate(num = rep(1:n, times=nrow(df))) |>
+      select(-Mean, -SD, -lower, -upper)|>
+      pivot_wider(names_from = names, values_from = point)|> 
+      select(-num)
+  } else {
+    # generate random points outside of bounds
+    df_tot = df |> slice(rep(1:n(), each=n))|>
+      mutate(point = 
+               truncnorm::rtruncnorm(1, mean = Mean, sd = SD)) |> 
+      ungroup() |> 
+      mutate(num = rep(1:n, times=nrow(df))) |>
+      select(-Mean, -SD)|>
+      pivot_wider(names_from = names, values_from = point)|> 
+      select(-num)
+  }
+  if (z_score) {
+    df_tot = df_tot  |>  
+      mutate(across(all_of(labs), scale))
+  }
+  
+  return(df_tot)
+  
+}
+
+
+# Load helper code for hypervolume analysis.
+g = read_csv('Data/SIA/comb100.csv') |> 
+  group_by(Site, Species, Source) |> 
+  summarize(m = mean(Contr),
+            sd = sd(Contr))
+
+
+# Run hypervolume models for each site/species combination.
+gb = HVvalues(df = g, ID_rows = c('Site','Species'),
+              names = c('Source'), 
+              mean = 'm', sd = 'sd', n = 100,
+              end_points = F, 
+              z_score = T) |> 
+  group_by(Site, Species) |> 
+  nest() |> 
+  mutate(hv = map(data, ~hypervolume_gaussian(.x, name = paste(Site,Species,sep = '_'), # change to label columns in data
+                                              samples.per.point = 1000,
+                                              kde.bandwidth = estimate_bandwidth(.x), 
+                                              sd.count = 3, 
+                                              quantile.requested = 0.95, 
+                                              quantile.requested.type = "probability", 
+                                              chunk.size = 1000, 
+                                              verbose = F)),
+         hv_size = get_volume(hv[[1]]))
+
+
+```
+
+### Extract each hypervolume for each individual site and species
+
+```{r}
+#Oyster", "Mud crab", "White shrimp", "Blue crab", "Pinfish"
+nco<-gb[[4]][[1]] #NC Oyster
+get_volume(nco)
+ncmc<-gb[[4]][[2]]#NC MC
+get_volume(ncmc)
+ncbc<-gb[[4]][[3]] #NC BC
+get_volume(ncbc)
+ncp<-gb[[4]][[4]]  #NC Pinfish
+get_volume(ncp)
+nio<-gb[[4]][[5]] #NI Oyster
+get_volume(nio)
+nimc<-gb[[4]][[6]] #NI MC
+get_volume(nimc)
+niws<-gb[[4]][[7]] #NI White shrimp
+get_volume(niws)
+nibc<-gb[[4]][[8]] #NI BC
+get_volume(nibc)
+nip<-gb[[4]][[9]] #NI Pinfish
+get_volume(nip)
+sio<-gb[[4]][[10]] #SI O
+get_volume(sio)
+simc<-gb[[4]][[11]] #SI MC
+get_volume(simc)
+siws<-gb[[4]][[12]] #SI WS
+get_volume(siws)
+sibc<-gb[[4]][[13]] #SI BC
+get_volume(sibc)
+sip<-gb[[4]][[14]] #SI Pinfish
+get_volume(sip)
+go<-gb[[4]][[15]] #GTM Oyster
+get_volume(go)
+gmc<-gb[[4]][[16]] #GTM MC
+get_volume(gmc)
+gws<-gb[[4]][[17]] #GTM WS
+get_volume(gws)
+gbc<-gb[[4]][[18]] #GTM BC
+get_volume(gbc)
+gp<-gb[[4]][[19]] #GTM Pinfish
+get_volume(gp)
+
+
+#Examine overlap statistics
+#Create a hypervolume set for a site comparision for each species 
+#Then look at the overlap statistics between each grouping
+hv_ws1 <- hypervolume_set(gws, siws, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_ws1)
+
+hv_ws2 <- hypervolume_set(gws, niws, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_ws2)
+
+hv_ws3 <- hypervolume_set(siws, niws, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_ws3)
+
+
+hv_o1 <- hypervolume_set(go, nco, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o1)
+
+hv_o2 <- hypervolume_set(sio, nio, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o2)
+
+hv_o3 <- hypervolume_set(sio, nco, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o3)
+
+hv_o4 <- hypervolume_set(nio, nco, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o4)
+
+hv_o5 <- hypervolume_set(nio, go, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o5)
+
+hv_o6 <- hypervolume_set(sio, go, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_o6)
+
+hv_p1 <- hypervolume_set(gp, ncp, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p1)
+
+hv_p2 <- hypervolume_set(sip, nip, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p2)
+
+hv_p3 <- hypervolume_set(sip, ncp, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p3)
+
+hv_p4 <- hypervolume_set(nip, ncp, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p4)
+
+hv_p5 <- hypervolume_set(nip, gp, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p5)
+
+hv_p6 <- hypervolume_set(sip, gp, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_p6)
+
+hv_mc1 <- hypervolume_set(gmc, ncmc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc1)
+
+hv_mc2 <- hypervolume_set(simc, nimc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc2)
+
+hv_mc3 <- hypervolume_set(simc, ncmc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc3)
+
+hv_mc4 <- hypervolume_set(nimc, ncmc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc4)
+
+hv_mc5 <- hypervolume_set(nimc, gmc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc5)
+
+hv_mc6 <- hypervolume_set(simc, gmc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_mc6)
+
+hv_bc1 <- hypervolume_set(gbc, ncbc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc1)
+
+hv_bc2 <- hypervolume_set(sibc, nibc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc2)
+
+hv_bc3 <- hypervolume_set(sibc, ncbc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc3)
+
+hv_bc4 <- hypervolume_set(nibc, ncbc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc4)
+
+hv_bc5 <- hypervolume_set(nibc, gbc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc5)
+
+hv_bc6 <- hypervolume_set(sibc, gbc, check.memory=FALSE)
+hypervolume_overlap_statistics(hv_bc6)
+
+
+set.seed(22)     
+```
+ 
+## Hypervolume visualization
+```{r}
+#Combine hypervolumes for each species (across all sites)
+bc<-hypervolume_join(ncbc, nibc, sibc, gbc) #Blue crabs
+oyst<-hypervolume_join(nco, nio, sio, go) #Oysters
+mc<-hypervolume_join(ncmc, nimc, simc, gmc) #Mud crabs
+pin<-hypervolume_join(ncp, nip, sip, gp) #Pinfish
+ws<-hypervolume_join(niws, siws, gws) #White shrimp
+
+#Blue crab
+plot(bc, pairplot = T, colors=c("#5e3c99","#e66101", "#fdb863","#B2abd2" ), show.3d=FALSE,plot.3d.axes.id=NULL,
+     show.axes=TRUE, show.frame=TRUE,
+     show.random=T, show.density=TRUE,show.data=F,
+     show.legend=T, 
+     show.contour=F, contour.lwd= 2, 
+     contour.type='alphahull', 
+     contour.alphahull.alpha=0.25,
+     contour.ball.radius.factor=1, 
+     contour.kde.level=0.01,
+     contour.raster.resolution=100,
+     show.centroid=TRUE, cex.centroid=2,
+     point.alpha.min=0.2, point.dark.factor=0.5,
+     cex.random=0.5,cex.data=1,cex.axis=1.5,cex.names=2,cex.legend=2,
+     num.points.max.data = 100000, num.points.max.random = 200000, reshuffle=TRUE,
+     plot.function.additional=NULL,
+     verbose=FALSE
+)
+
+#Mud crab
+plot(mc, pairplot = T, colors=c("#5e3c99","#e66101", "#fdb863","#B2abd2" ), show.3d=FALSE,plot.3d.axes.id=NULL,
+     show.axes=TRUE, show.frame=TRUE,
+     show.random=T, show.density=TRUE,show.data=F,
+     show.legend=T, 
+     show.contour=F, contour.lwd= 2, 
+     contour.type='alphahull', 
+     contour.alphahull.alpha=0.25,
+     contour.ball.radius.factor=1, 
+     contour.kde.level=0.01,
+     contour.raster.resolution=100,
+     show.centroid=TRUE, cex.centroid=2,
+     point.alpha.min=0.2, point.dark.factor=0.5,
+     cex.random=0.5,cex.data=1,cex.axis=1.5,cex.names=2,cex.legend=2,
+     num.points.max.data = 100000, num.points.max.random = 200000, reshuffle=TRUE,
+     plot.function.additional=NULL,
+     verbose=FALSE
+)
+
+#Oyster
+plot(oyst, pairplot = T, colors=c("#5e3c99","#e66101", "#fdb863","#B2abd2" ), show.3d=FALSE,plot.3d.axes.id=NULL,
+     show.axes=TRUE, show.frame=TRUE,
+     show.random=T, show.density=TRUE,show.data=F,
+     show.legend=T, 
+     show.contour=F, contour.lwd= 2, 
+     contour.type='alphahull', 
+     contour.alphahull.alpha=0.25,
+     contour.ball.radius.factor=1, 
+     contour.kde.level=0.01,
+     contour.raster.resolution=100,
+     show.centroid=TRUE, cex.centroid=2,
+     point.alpha.min=0.2, point.dark.factor=0.5,
+     cex.random=0.5,cex.data=1,cex.axis=1.5,cex.names=2,cex.legend=2,
+     num.points.max.data = 100000, num.points.max.random = 200000, reshuffle=TRUE,
+     plot.function.additional=NULL,
+     verbose=FALSE
+)
+
+#Pinfish
+plot(pin, pairplot = T, colors=c("#5e3c99","#e66101", "#fdb863","#B2abd2" ), show.3d=FALSE,plot.3d.axes.id=NULL,
+     show.axes=TRUE, show.frame=TRUE,
+     show.random=T, show.density=TRUE,show.data=F,
+     show.legend=T, 
+     show.contour=F, contour.lwd= 2, 
+     contour.type='alphahull', 
+     contour.alphahull.alpha=0.25,
+     contour.ball.radius.factor=1, 
+     contour.kde.level=0.01,
+     contour.raster.resolution=100,
+     show.centroid=TRUE, cex.centroid=2,
+     point.alpha.min=0.2, point.dark.factor=0.5,
+     cex.random=0.5,cex.data=1,cex.axis=1.5,cex.names=2,cex.legend=2,
+     num.points.max.data = 100000, num.points.max.random = 200000, reshuffle=TRUE,
+     plot.function.additional=NULL,
+     verbose=FALSE
+)
+
+#White shrimp
+plot(ws, pairplot = T, colors=c("#e66101", "#fdb863","#B2abd2" ), show.3d=FALSE,plot.3d.axes.id=NULL,
+     show.axes=TRUE, show.frame=TRUE,
+     show.random=T, show.density=TRUE,show.data=F,
+     show.legend=T, 
+     show.contour=F, contour.lwd= 2, 
+     contour.type='alphahull', 
+     contour.alphahull.alpha=0.25,
+     contour.ball.radius.factor=1, 
+     contour.kde.level=0.01,
+     contour.raster.resolution=100,
+     show.centroid=TRUE, cex.centroid=2,
+     point.alpha.min=0.2, point.dark.factor=0.5,
+     cex.random=0.5,cex.data=1,cex.axis=1.5,cex.names=2,cex.legend=2,
+     num.points.max.data = 100000, num.points.max.random = 200000, reshuffle=TRUE,
+     plot.function.additional=NULL,
+     verbose=FALSE
+)
+
+```
+
+## Trophic level calculations
+
+```{r}
+#Using bootstrapped source contributions created above to calculate trophic levels of each species by site
+Tlc<-comb100X%>% 
+  #mutate(Site = fct_recode(Site, "NIWB" = "NI"))%>%
+  group_by(Site, Species, Source)%>%
+  mutate(rep=c(1:100))%>%
+  spread(Source, Contr)
+ 
+#Select source means N15 values 
+sourcemeans<-read.csv("Data/SIA/MCsources.csv")%>%
+  mutate(Site = fct_recode(Site, "NIWB" = "NI-WB"))%>%
+  group_by(Site)%>%
+  select(Source, Meand15N)%>%
+  spread(Source, Meand15N)
+
+sourcemeans<-sourcemeans%>%
+  rename(Bmean=`Benthic algae`, Pmean=POM, Smean=Spartina)
+
+#Combine bootstrapped file with source means
+TLc1<-left_join(Tlc, sourcemeans, by="Site")
+
+
+indv<-read.csv("Data/SIA/AllConsumers.csv")%>%
+   mutate(Site = fct_recode(Site, "NIWB" = "NI-WB"))%>%
+  group_by(Site, Species)%>%
+  summarise(meand15N = mean(d15N))
+
+TL1<-left_join(TLc1, indv, by=c("Site", "Species"))
+
+#Calcualte TL using source contribtuions, source N15 means, and discrimination factor values
+TL1<-TL1%>%
+  mutate(TL = ((meand15N-((Bmean*`Benthic algae`)+(Pmean*POM)+(Smean*Spartina)))/3.3)+1)
+
+```
+
+## Trophic-level plots and statistical tests
+
+```{r}
+#Rename and reorder sites and species 
+TL1<-TL1%>%mutate(Site = fct_recode(Site, "NI-WB"="NIWB"))
+TL1$Site<-factor(TL1$Site, levels=c("NC", "NI-WB", "SI", "GTM"))
+TL1$Species<-factor(TL1$Species, levels=c("Oyster", "Mud crab", "White shrimp", "Blue crab", "Pinfish"))
+
+#Plot trophic levels 
+ggplot(TL1, aes(x=Species, y=TL))+
+  geom_jitter(color="gray80", size = 1)+
+  geom_boxplot(aes(fill=Site))+
+  scale_fill_manual(values=c("#e66101", "#fdb863","#B2abd2", "#5e3c99" ))+
+  labs(y="Trophic level")+
+  facet_wrap(~Site, ncol=2)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position="none")
+
+#Calculate mean & SD for TL for tables
+meanTLs<-TL1 %>%
+  group_by(Site, Species)%>%
+  summarize(meanTL=mean(TL), sdTL=sd(TL))
+
+
+#Run Kruskal-Wallis and Dunn Posthoc tests
+kruskal.test(TL~Site, data=TL1)
+rstatix::dunn_test(data=TL1, TL~Site, p.adjust.method ="bonferroni")
+
+#Use different package for Dunn Test for comparison
+library(FSA)
+dunnTest(TL~Site, data = TL1, method = "bonferroni")
+```
